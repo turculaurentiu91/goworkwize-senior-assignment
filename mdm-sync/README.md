@@ -1,66 +1,219 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# MDM Device Sync
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+A Laravel application for synchronizing device data from Mobile Device Management (MDM) providers. The architecture supports multiple MDM providers through an extensible contract-based design.
 
-## About Laravel
+## Architecture
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+### Directory Structure
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+```
+app/
+├── Contracts/
+│   └── MdmProviderInterface.php       # Contract for all MDM providers
+├── DTOs/
+│   ├── DeviceDTO.php                  # Normalized device data
+│   ├── EmployeeDTO.php                # Normalized employee data
+│   ├── SyncResultDTO.php              # Sync operation results
+│   └── DeviceAttributesDTO.php        # Hardware attributes
+├── Services/
+│   └── Sync/
+│       ├── MdmSyncService.php         # Orchestrator service
+│       ├── MdmProviderRegistry.php    # Provider registration/resolution
+│       └── Providers/
+│           ├── AbstractMdmProvider.php    # Base class with shared logic
+│           └── JamfProvider.php           # Jamf implementation
+└── Providers/
+    └── MdmServiceProvider.php         # Service provider registration
+```
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+### Key Components
 
-## Learning Laravel
+**DTOs (Data Transfer Objects)**
+- `EmployeeDTO` - Normalized employee data (email, name, phone)
+- `DeviceAttributesDTO` - Hardware attributes (model, processor, cores, RAM, battery)
+- `DeviceDTO` - Complete device with employee and attributes
+- `SyncResultDTO` - Sync operation results with counts and errors
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+**Contracts**
+- `MdmProviderInterface` - Defines the contract all MDM providers must implement:
+  - `getIdentifier()` - Unique provider ID (e.g., 'jamf')
+  - `getName()` - Human-readable name
+  - `fetchDevices()` - Returns iterable of DeviceDTO objects
+  - `isConfigured()` - Checks if provider is properly configured
 
-You may also try the [Laravel Bootcamp](https://bootcamp.laravel.com), where you will be guided through building a modern Laravel application from scratch.
+**Services**
+- `AbstractMdmProvider` - Base class with shared validation (email, serial normalization)
+- `JamfProvider` - Jamf MDM implementation using file-based data source
+- `MdmProviderRegistry` - Manages provider registration and lookup
+- `MdmSyncService` - Orchestrates sync: fetches from provider, persists to database
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+## API
 
-## Laravel Sponsors
+### Sync Devices
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+```
+POST /api/sync/{provider}
+```
 
-### Premium Partners
+Triggers a sync from the specified MDM provider.
 
-- **[Vehikl](https://vehikl.com/)**
-- **[Tighten Co.](https://tighten.co)**
-- **[WebReinvent](https://webreinvent.com/)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel/)**
-- **[Cyber-Duck](https://cyber-duck.co.uk)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Jump24](https://jump24.co.uk)**
-- **[Redberry](https://redberry.international/laravel/)**
-- **[Active Logic](https://activelogic.com)**
-- **[byte5](https://byte5.de)**
-- **[OP.GG](https://op.gg)**
+**Parameters:**
+- `provider` - The MDM provider identifier (e.g., `jamf`)
 
-## Contributing
+**Response:**
+```json
+{
+  "provider": "jamf",
+  "created_assets": 5,
+  "updated_assets": 10,
+  "created_employees": 3,
+  "skipped_unassigned": 2,
+  "skipped_missing_serial": 1,
+  "errors": []
+}
+```
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+**Error Response (404):**
+```json
+{
+  "error": "Unknown MDM provider: unknown",
+  "available_providers": ["jamf"]
+}
+```
 
-## Code of Conduct
+### Other Endpoints
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+- `GET /api/assets` - List all assets
+- `DELETE /api/assets/{id}` - Delete an asset
+- `GET /api/employees` - List all employees
+- `DELETE /api/employees/{id}` - Delete an employee
 
-## Security Vulnerabilities
+## Adding a New MDM Provider
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+To add support for a new MDM provider (e.g., Kandji):
 
-## License
+1. **Create the provider class:**
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+```php
+// app/Services/Sync/Providers/KandjiProvider.php
+<?php
+
+namespace App\Services\Sync\Providers;
+
+use App\DTOs\DeviceAttributesDTO;
+use App\DTOs\DeviceDTO;
+use App\DTOs\EmployeeDTO;
+use Generator;
+
+final class KandjiProvider extends AbstractMdmProvider
+{
+    public function __construct(
+        private readonly string $apiKey,
+        private readonly string $baseUrl
+    ) {}
+
+    public function getIdentifier(): string
+    {
+        return 'kandji';
+    }
+
+    public function getName(): string
+    {
+        return 'Kandji MDM';
+    }
+
+    public function isConfigured(): bool
+    {
+        return !empty($this->apiKey) && !empty($this->baseUrl);
+    }
+
+    public function fetchDevices(): Generator
+    {
+        $devices = $this->fetchFromApi();
+
+        foreach ($devices as $device) {
+            $serial = $this->normalizeSerial($device['serial_number']);
+            if ($serial === null) {
+                continue;
+            }
+
+            $email = $this->normalizeEmail($device['user']['email'] ?? null);
+            if ($email === null) {
+                continue;
+            }
+
+            yield new DeviceDTO(
+                serialNumber: $serial,
+                deviceName: $device['device_name'] ?? 'Unknown',
+                employee: new EmployeeDTO(
+                    email: $email,
+                    name: $device['user']['name'] ?? null,
+                ),
+                attributes: new DeviceAttributesDTO(
+                    model: $device['model'] ?? null,
+                ),
+            );
+        }
+    }
+
+    private function fetchFromApi(): array
+    {
+        // Implement API call to Kandji
+    }
+}
+```
+
+2. **Register the provider in `MdmServiceProvider`:**
+
+```php
+// app/Providers/MdmServiceProvider.php
+$this->app->singleton(MdmProviderRegistry::class, function ($app) {
+    $registry = new MdmProviderRegistry();
+
+    $registry->register(new JamfProvider(
+        base_path('files/api-mock-response.json')
+    ));
+
+    $registry->register(new KandjiProvider(
+        config('services.kandji.api_key'),
+        config('services.kandji.base_url')
+    ));
+
+    return $registry;
+});
+```
+
+3. **Use the new provider:**
+
+```
+POST /api/sync/kandji
+```
+
+## Setup
+
+```bash
+# Install dependencies
+composer install
+npm install
+
+# Configure environment
+cp .env.example .env
+php artisan key:generate
+
+# Run migrations
+php artisan migrate
+
+# Start development server
+php artisan serve
+npm run dev
+```
+
+## Testing
+
+```bash
+# Run PHP tests
+php artisan test
+
+# Test sync endpoint
+curl -X POST http://localhost:8000/api/sync/jamf
+```
